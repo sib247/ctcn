@@ -1,5 +1,5 @@
 {
-  "name": "SmartSpend - Quản lý Chi tiêu & Hoàn tiền",
-  "description": "Ứng dụng quản lý tài chính cá nhân tối ưu với tính năng theo dõi thẻ tín dụng và tự động tính toán hoàn tiền (Cashback) thông minh.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "name": "",
+  "description": ""
 }

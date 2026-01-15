@@ -11,11 +11,11 @@ export enum TransactionType {
 
 export interface CashbackRule {
   id: string;
-  categoryId: string; // "ALL" for everything else
-  mcc?: string; // Specific Merchant Category Code
+  groupName: string; // Tên danh mục hoàn tiền (VD: Ẩm thực, Online, Siêu thị)
+  mcc?: string; // Mã loại giao dịch (VD: 5812, 5411)
   percentage: number;
   minSpend: number;
-  maxRewardPerPeriod: number; // 0 for unlimited
+  maxRewardPerPeriod: number; // 0 là không giới hạn
 }
 
 export interface Wallet {
@@ -23,35 +23,35 @@ export interface Wallet {
   name: string;
   type: WalletType;
   balance: number;
-  creditLimit?: number; // Only for CREDIT
-  statementDate?: number; // Day of month (1-31)
-  cashbackCycleStartDay?: number; // Day of month (1-31)
+  creditLimit?: number; 
+  statementDate?: number; 
+  cashbackCycleStartDay?: number; 
   cashbackRules: CashbackRule[];
 }
 
-export interface Category {
+export interface TransactionGroup {
   id: string;
   name: string;
   type: TransactionType;
-  icon: string; // Name of lucide icon
+  icon: string;
   color: string;
-  mcc?: string; // Default MCC for this category
 }
 
 export interface Transaction {
   id: string;
   walletId: string;
-  categoryId: string;
+  transactionGroupId: string; // Nhóm giao dịch (Ăn uống, Di chuyển...)
+  cashbackRuleId?: string; // Quy tắc hoàn tiền áp dụng
   amount: number;
-  date: string; // ISO String YYYY-MM-DD
+  date: string; // YYYY-MM-DD
   note: string;
   type: TransactionType;
-  cashbackAmount: number; // Calculated automatically
+  cashbackAmount: number;
 }
 
 export interface AppData {
   wallets: Wallet[];
-  categories: Category[];
+  transactionGroups: TransactionGroup[];
   transactions: Transaction[];
   currency: string;
   userName: string;
