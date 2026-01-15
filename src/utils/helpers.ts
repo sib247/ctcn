@@ -1,127 +1,85 @@
-import { Transaction, Wallet } from '../types';
+import { Wallet, CashbackRule, Transaction } from '../types';
 
-export const formatCurrency = (amount: number, currency = 'VND'): string => {
-  return new Intl.NumberFormat('vi-VN', {
-    style: 'currency',
-    currency: currency,
-    maximumFractionDigits: 0,
-  }).format(amount);
-};
-
-export const getCashbackCycleRange = (dateStr: string, startDay: number) => {
-  const date = new Date(dateStr);
-  let start = new Date(date.getFullYear(), date.getMonth(), startDay);
-  
-  // If the transaction date is before the start day of this month, 
-  // then it belongs to the cycle starting in the previous month.
-  if (date.getDate() < startDay) {
-    start = new Date(date.getFullYear(), date.getMonth() - 1, startDay);
+export function formatCurrency(amount: number, currency: string): string {
+  if (currency === 'VND') {
+    return `${amount.toLocaleString('vi-VN')}₫`;
   }
+  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+}
 
-  // End date is the day before the next start day
-  const end = new Date(start);
-  end.setMonth(start.getMonth() + 1);
-  end.setDate(start.getDate() - 1); // e.g., if start is 5th, end is 4th of next month
-
-  return { start, end };
-};
-
-export const calculateTotalCashbackInPeriod = (
-  walletId: string,
-  ruleId: string,
-  cycleStart: Date,
-  cycleEnd: Date,
-  allTransactions: Transaction[]
-): number => {
-  // Filter transactions for this wallet within the cycle
-  // Note: This needs complex logic to map transactions back to rules if multiple rules apply.
-  // Simplified: We assume we can sum up cashbackAmount of transactions that matched this rule.
-  // However, Transaction object doesn't store ruleId. 
-  // To strictly enforce caps, we often need to re-evaluate or store ruleId.
-  // For this app, let's sum total cashback for the wallet if the rule is generic, 
-  // or filter by category if the rule is category specific.
+export function getCashbackCycleRange(date: string, cycleStartDay: number): { start: Date; end: Date } {
+  const current = new Date(date);
+  const currentDay = current.getDate();
   
-  return 0; // Placeholder, logic moved to main calculate function for efficiency
-};
+  let start: Date;
+  let end: Date;
+  
+  if (currentDay >= cycleStartDay) {
+    // Current cycle
+    start = new Date(current.getFullYear(), current.getMonth(), cycleStartDay);
+    end = new Date(current.getFullYear(), current.getMonth() + 1, cycleStartDay - 1);
+  } else {
+    // Previous cycle
+    start = new Date(current.getFullYear(), current.getMonth() - 1, cycleStartDay);
+    end = new Date(current.getFullYear(), current.getMonth(), cycleStartDay - 1);
+  }
+  
+  return { start, end };
+}
 
-export const calculatePotentialCashback = (
+export function calculatePotentialCashback(
   amount: number,
   wallet: Wallet,
   categoryId: string,
-  dateStr: string,
+  date: string,
   allTransactions: Transaction[]
-): number => {
-  if (wallet.type !== 'CREDIT' || !wallet.cashbackRules || wallet.cashbackRules.length === 0) {
+): number {
+  if (!wallet.cashbackRules || wallet.cashbackRules.length === 0) {
     return 0;
   }
 
-  // 1. Find matching rule
-  let rule = wallet.cashbackRules.find(r => r.categoryId === categoryId);
-  // If no specific rule, look for "ALL"
-  if (!rule) {
-    rule = wallet.cashbackRules.find(r => r.categoryId === 'ALL');
+  // Find applicable rule (category specific first, then ALL)
+  let applicableRule: CashbackRule | undefined = wallet.cashbackRules.find(
+    r => r.categoryId === categoryId
+  );
+  
+  if (!applicableRule) {
+    applicableRule = wallet.cashbackRules.find(r => r.categoryId === 'ALL');
+  }
+  
+  if (!applicableRule) {
+    return 0;
   }
 
-  if (!rule) return 0;
-  if (amount < rule.minSpend) return 0;
+  // Check minimum spend
+  if (amount < applicableRule.minSpend) {
+    return 0;
+  }
 
-  // 2. Calculate theoretical cashback
-  let calculated = amount * (rule.percentage / 100);
+  // Calculate base cashback
+  let cashback = (amount * applicableRule.percentage) / 100;
 
-  // 3. Check Period Cap
-  if (rule.maxRewardPerPeriod > 0) {
-    const startDay = wallet.cashbackCycleStartDay || 1;
-    const { start, end } = getCashbackCycleRange(dateStr, startDay);
+  // Check max reward per period if set
+  if (applicableRule.maxRewardPerPeriod > 0) {
+    const { start, end } = getCashbackCycleRange(date, wallet.cashbackCycleStartDay || 1);
     
-    // Sum existing cashback for this specific rule (approximate by category match) in the current cycle
-    const relevantTransactions = allTransactions.filter(t => {
-      if (t.walletId !== wallet.id) return false;
+    // Calculate total cashback already earned in this cycle for this rule
+    const cycleTransactions = allTransactions.filter(t => {
       const tDate = new Date(t.date);
-      if (tDate < start || tDate > end) return false;
-      
-      // Check if this transaction likely used the same rule
-      // (This is heuristic since we don't store ruleId on transaction)
-      if (rule!.categoryId === 'ALL') {
-         // If rule is ALL, it includes everything that DIDNT match a specific rule
-         // This is complex to check retroactively without storing ruleId.
-         // Simplification: Sum ALL cashback for this wallet in this period? 
-         // No, that might overlap with specific categories.
-         // Let's assume for this app: Limit is per Category Rule.
-         return t.categoryId !== rule!.categoryId; // Logic flaw here without ruleId.
-      } else {
-         return t.categoryId === rule!.categoryId;
-      }
+      return t.walletId === wallet.id && tDate >= start && tDate <= end;
     });
 
-    // Better approach for this app size:
-    // If the rule has a limit, we sum up cashback of transactions with that category in this period.
-    // If rule is 'ALL', we sum up cashback of transactions that don't belong to other specific rules.
+    let totalCashbackThisCycle = cycleTransactions.reduce((sum, t) => sum + t.cashbackAmount, 0);
     
-    let currentPeriodCashback = 0;
+    // Check if adding this cashback would exceed the limit
+    const remainingLimit = applicableRule.maxRewardPerPeriod - totalCashbackThisCycle;
     
-    const specificRuleCategoryIds = wallet.cashbackRules
-      .filter(r => r.categoryId !== 'ALL')
-      .map(r => r.categoryId);
-
-    const txsInCycle = allTransactions.filter(t => {
-       const tDate = new Date(t.date);
-       return t.walletId === wallet.id && tDate >= start && tDate <= end;
-    });
-
-    if (rule.categoryId === 'ALL') {
-       // Sum cashback of txs that are NOT in specific categories
-       currentPeriodCashback = txsInCycle
-         .filter(t => !specificRuleCategoryIds.includes(t.categoryId))
-         .reduce((sum, t) => sum + t.cashbackAmount, 0);
-    } else {
-       currentPeriodCashback = txsInCycle
-         .filter(t => t.categoryId === rule!.categoryId)
-         .reduce((sum, t) => sum + t.cashbackAmount, 0);
+    if (remainingLimit <= 0) {
+      return 0;
     }
-
-    const remaining = Math.max(0, rule.maxRewardPerPeriod - currentPeriodCashback);
-    return Math.min(calculated, remaining);
+    
+    cashback = Math.min(cashback, remainingLimit);
   }
 
-  return calculated;
-};
+  return Math.round(cashback);
+}
